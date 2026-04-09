@@ -9,7 +9,6 @@ dependencies = [
     "langchain>=1.0.5",
     "langchain-core>=1.0.4",
     "langchain-openai>=1.0.2",
-    "langfuse==3.9.1",
     "langgraph>=1.0.2",
     "passlib[bcrypt]>=1.7.4",
     "pydantic[email]>=2.11.1",

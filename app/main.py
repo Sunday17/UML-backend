@@ -1,6 +1,5 @@
 """This file contains the main application entry point."""
 
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import (
@@ -8,7 +7,6 @@ from typing import (
     Dict,
 )
 
-from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
     Request,
@@ -17,23 +15,12 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from langfuse import Langfuse
 
 from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.middleware import LoggingContextMiddleware
 from app.services.database import database_service
-
-# Load environment variables
-load_dotenv()
-
-# Initialize Langfuse
-langfuse = Langfuse(
-    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-)
 
 
 @asynccontextmanager

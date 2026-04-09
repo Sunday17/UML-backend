@@ -11,7 +11,6 @@ from langchain_core.messages import (
     ToolMessage,
     convert_to_openai_messages,
 )
-from langfuse.langchain import CallbackHandler
 from langgraph.graph import (
     END,
     StateGraph,
@@ -175,8 +174,8 @@ class LangGraphAgent:
 
         Args:
             messages (list[Message]): The messages to send to the LLM.
-            session_id (str): The session ID for Langfuse tracking.
-            user_id (Optional[str]): The user ID for Langfuse tracking.
+            session_id (str): The session ID for conversation context.
+            user_id (Optional[str]): The user ID for conversation context.
 
         Returns:
             list[dict]: The response from the LLM.
@@ -185,7 +184,6 @@ class LangGraphAgent:
             self._graph = await self.create_graph()
         config = {
             "configurable": {"thread_id": session_id},
-            "callbacks": [CallbackHandler()],
             "metadata": {
                 "user_id": user_id,
                 "session_id": session_id,
@@ -221,11 +219,6 @@ class LangGraphAgent:
         """
         config = {
             "configurable": {"thread_id": session_id},
-            "callbacks": [
-                CallbackHandler(
-                    environment=settings.ENVIRONMENT.value, debug=False, user_id=user_id, session_id=session_id
-                )
-            ],
             "metadata": {
                 "user_id": user_id,
                 "session_id": session_id,
