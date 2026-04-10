@@ -9,11 +9,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "UML"
     VERSION: str = "1.0.0"
     DEBUG: bool = True
-    API_V1_STR: str = "/api/v1"
-
 
     # 2. CORS 跨域设置
     # 将字符串 "http://localhost:3000,..." 自动解析为 List
+    API_V1_STR: str = ""
     ALLOWED_ORIGINS: Union[str, List[str]] = []
 
     @field_validator("ALLOWED_ORIGINS", mode="before")

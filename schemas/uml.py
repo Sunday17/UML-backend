@@ -1,31 +1,93 @@
-# app/schemas/uml.py
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+"""UML-related Pydantic schemas."""
 
-# --- 请求体 (Requests) ---
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional
+
+
+# ================================================================
+# 1. 项目管理
+# ================================================================
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., example="图书管理系统")
+    requirement_text: str = Field(..., example="用户可以注册、登录、查询图书")
+
+
+class ProjectOut(BaseModel):
+    id: int
+    name: str
+    requirement_text: str
+    thread_id: str
+    created_at: Any
+
+    model_config = {"from_attributes": True}
+
+
+# ================================================================
+# 2. 提取接口 (针对不同图类型)
+# ================================================================
 
 class ExtractRequest(BaseModel):
-    """前端发起新建项目并提取用例的请求"""
-    name: str = Field(..., example="图书管理系统")
-    requirement_text: str = Field(..., example="系统需要包含图书借阅、归还、用户管理等功能...")
+    project_id: int
+    requirement_text: str = Field(
+        ...,
+        example="用户登录系统后，可以查询图书并下单",
+        description="支持在提取时动态更新需求文本",
+    )
 
-class UsecaseConfirmRequest(BaseModel):
-    """前端用户修改JSON后，点击确认生成的请求"""
-    thread_id: str = Field(..., description="必须携带之前返回的会话ID")
-    actors: List[Dict[str, Any]] = Field(..., description="用户确认后的角色列表")
-    usecases: List[Dict[str, Any]] = Field(..., description="用户确认后的用例列表")
 
-class RenderRequest(BaseModel):
-    """前端用户手动修改 PUML 代码后请求重新渲染"""
-    puml_code: str = Field(..., description="修改后的 PlantUML 源码")
+# ================================================================
+# 3. 提取结果响应 (表格数据)
+# ================================================================
 
-# --- 响应体 (Responses) ---
+class TableDataResponse(BaseModel):
+    project_id: int
+    thread_id: str
+    model_type: str
+    extracted_data: Dict[str, Any] = Field(
+        ...,
+        description=(
+            "usecase: {actors:[], usecases:[], entities:{}}  "
+            "class:  {classes:[], class_details:{}, class_relationships:{}}  "
+            "sequence:{sequence_data:{}}"
+        ),
+    )
 
-class UMLResponse(BaseModel):
-    """统一的 UML 接口返回格式"""
-    status: str = Field(default="success")
-    thread_id: Optional[str] = None
-    data: Optional[Dict[str, Any]] = Field(default=None, description="提取出的结构化JSON")
-    puml_code: Optional[str] = Field(default=None, description="生成的PlantUML代码")
-    image_base64: Optional[str] = Field(default=None, description="渲染好的图片(Base64)")
-    message: Optional[str] = None
+
+# ================================================================
+# 4. 确认并生成请求
+# ================================================================
+
+class GenerateRequest(BaseModel):
+    project_id: int
+    confirmed_data: Dict[str, Any] = Field(
+        ...,
+        description="用户在表格中修改后的确认数据，格式同 extracted_data",
+    )
+
+
+# ================================================================
+# 5. 最终产物响应
+# ================================================================
+
+class UMLFinalResponse(BaseModel):
+    puml_code: str = Field(..., description="生成的 PlantUML 源码")
+    image_base64: str = Field(
+        ...,
+        description="渲染后的图片，格式: data:image/png;base64,...",
+    )
+
+
+# ================================================================
+# 6. PUML 逆向同步
+# ================================================================
+
+class SyncRequest(BaseModel):
+    project_id: int
+    model_type: str = Field(..., example="usecase")
+    puml_code: str = Field(..., example="@startuml\n:Actor: -> (UseCase)\n@enduml")
+
+
+class SyncResponse(BaseModel):
+    image_base64: str = Field(..., description="重新渲染后的图片 Base64")
+    synced_model: Dict[str, Any] = Field(..., description="从 PUML 逆向解析出的 JSON 数据")
