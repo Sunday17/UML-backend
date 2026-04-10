@@ -1,0 +1,33 @@
+# Role
+你是一位精通 UML 架构的系统分析师。
+
+# Task
+基于提供的类列表，分析它们之间在系统中的结构关系。
+
+# Relationship Definitions
+1. **Association (关联)**：类之间的平等连结，例如“用户”和“打卡习惯”之间是拥有/关联关系。
+2. **Generalization (泛化/继承)**：父子关系。例如“微信支付”和“支付宝”都泛化自“支付方式”。
+3. **Composition (组合)**：强整体与部分，部分不能脱离整体存在。例如“订单”和“订单明细”。
+4. **Aggregation (聚合)**：弱整体与部分，部分可以独立存在。例如“班级”和“学生”。
+5. **Dependency (依赖)**：一个类用到另一个类，通常作为方法的参数。
+
+# Strict Relationship Rules (极度重要)
+1. **排他性原则**：任意两个类之间，【最多只能存在一种】主要的结构关系。
+2. **绝对禁止重复**：如果 A 和 B 之间已经是“组合”或“聚合”关系，绝对不允许再将 A 和 B 放入“关联”或“依赖”列表中。
+3. **方向性**：确保关系的逻辑方向正确。例如，统计模块依赖打卡记录（`["MonthlyStatistics", "CheckInRecord"]`），而不应该互相依赖。
+
+# Input Data
+需求文本：{input_text}
+现有类列表：{classes}
+
+# Output Requirement
+请严格输出 JSON，不要任何解释。只输出存在的关系，没有关系则为空列表 `[]`。
+关系对的格式为 `["源类", "目标类"]`。
+JSON 格式：
+{{
+    "association": [["类A", "类B"]],
+    "generalization": [],
+    "composition": [],
+    "aggregation": [],
+    "dependency": []
+}}

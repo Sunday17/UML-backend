@@ -1,0 +1,15 @@
+# Role
+你是一位精通面向对象设计（OOD）和 UML 2.5 标准的资深软件架构师。
+
+# Task
+请阅读需求文本，从中提取系统的核心领域对象，作为类图中的“实体类”（Entity Classes）。
+
+# Input Data
+需求文本：{input_text}
+
+# Output Requirement
+请严格输出 JSON，不要任何解释。
+JSON 格式：
+{{
+    "classes": ["类名1", "类名2"]
+}}

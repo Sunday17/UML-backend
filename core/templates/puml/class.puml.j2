@@ -1,0 +1,39 @@
+@startuml
+title 自动生成：系统类图
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 50
+
+{%- for cls in classes %}
+class "{{ cls }}" {
+{%- if class_details is defined and cls in class_details %}
+  ' 属性区 (默认设为 private: -)
+  {%- for attr in class_details[cls].get("attributes", []) %}
+  - {{ attr }};
+  {%- endfor %}
+  ' 方法区 (默认设为 public: +)
+  {%- for method in class_details[cls].get("methods", []) %}
+  + {{ method }};
+  {%- endfor %}
+{%- endif %}
+}
+{%- endfor %}
+
+' 2.1 Association (关联关系: --)
+{%- for rel in class_relationships.get("association", []) %}
+"{{ rel[0] }}" -- "{{ rel[1] }}"
+{%- endfor %}
+{%- for rel in class_relationships.get("generalization", []) %}
+"{{ rel[0] }}" --|> "{{ rel[1] }}"
+{%- endfor %}
+{%- for rel in class_relationships.get("composition", []) %}
+"{{ rel[0] }}" *-- "{{ rel[1] }}"
+{%- endfor %}
+{%- for rel in class_relationships.get("aggregation", []) %}
+"{{ rel[0] }}" o-- "{{ rel[1] }}"
+{%- endfor %}
+{%- for rel in class_relationships.get("dependency", []) %}
+"{{ rel[0] }}" ..> "{{ rel[1] }}"
+{%- endfor %}
+@enduml

@@ -1,0 +1,48 @@
+@startuml
+title 自动生成：系统用例图
+left to right direction
+
+skinparam packageStyle rectangle
+skinparam nodesep 15
+skinparam ranksep 40
+skinparam usecase {
+    BackgroundColor #F9F9F9
+    BorderColor #333333
+    ArrowColor #666666
+}
+skinparam actor {
+    BackgroundColor #FAFAFA
+    BorderColor #333333
+}
+{%- for actor in actors %}
+actor "{{ actor }}"
+{%- endfor %}
+{%- for uc in usecases %}
+usecase "{{ uc }}"
+{%- endfor %}
+{%- for actor, ucs in relationships.association.items() %}
+{%- for uc in ucs %}
+"{{ actor }}" -- "{{ uc }}"
+{%- endfor %}
+{%- endfor %}
+{%- for base, targets in relationships.inclusion.items() %}
+{%- for target in targets %}
+"{{ base }}" ..> "{{ target }}" : <<include>>
+{%- endfor %}
+{%- endfor %}
+{%- for base, extensions in relationships.extension.items() %}
+{%- for ext in extensions %}
+"{{ base }}" <.. "{{ ext }}" : <<extend>>
+{%- endfor %}
+{%- endfor %}
+{%- for parent, children in relationships.uc_gen.items() %}
+{%- for child in children %}
+"{{ parent }}" <|-- "{{ child }}"
+{%- endfor %}
+{%- endfor %}
+{%- for parent, children in relationships.act_gen.items() %}
+{%- for child in children %}
+"{{ parent }}" <|-- "{{ child }}"
+{%- endfor %}
+{%- endfor %}
+@enduml

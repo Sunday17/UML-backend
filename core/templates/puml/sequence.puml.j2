@@ -1,0 +1,76 @@
+@startuml
+title 时序图：{{ usecase_name }}
+skinparam maxMessageSize 150
+skinparam sequenceMessageAlign center
+autonumber "<b>[00]"
+
+skinparam sequence {
+    ArrowColor #336699
+    ActorBorderColor #336699
+    LifeLineBorderColor #336699
+    LifeLineBackgroundColor #E2E8F0
+    
+    ParticipantBorderColor #336699
+    ParticipantBackgroundColor #EBF4FA
+    ParticipantFontColor #333333
+    ParticipantFontSize 14
+    
+    DatabaseBorderColor #336699
+    DatabaseBackgroundColor #EBF4FA
+    DatabaseFontColor #333333
+    
+    BoundaryBorderColor #336699
+    BoundaryBackgroundColor #EBF4FA
+    
+    ControlBorderColor #336699
+    ControlBackgroundColor #EBF4FA
+}
+
+{%- for p in participants %}
+    {%- if loop.first %}
+        ' 第一个参与者使用特殊标记
+        {%- if p.type|lower == 'actor' %}
+actor "{{ p.name }}" << (A,#FFAAAA) >> order 0
+        {%- elif p.type|lower == 'boundary' %}
+boundary "{{ p.name }}" << (B,#FFAAAA) >> order 0
+        {%- elif p.type|lower == 'control' %}
+control "{{ p.name }}" << (C,#FFAAAA) >> order 0
+        {%- elif p.type|lower == 'database' %}
+database "{{ p.name }}" << (D,#FFAAAA) >> order 0
+        {%- elif p.type|lower == 'entity' %}
+entity "{{ p.name }}" << (E,#FFAAAA) >> order 0
+        {%- else %}
+participant "{{ p.name }}" << (P,#FFAAAA) >> order 0
+        {%- endif %}
+    {%- else %}
+        {%- if p.type|lower == 'actor' %}
+actor "{{ p.name }}"
+        {%- elif p.type|lower == 'boundary' %}
+boundary "{{ p.name }}"
+        {%- elif p.type|lower == 'control' %}
+control "{{ p.name }}"
+        {%- elif p.type|lower == 'database' %}
+database "{{ p.name }}"
+        {%- elif p.type|lower == 'entity' %}
+entity "{{ p.name }}"
+        {%- else %}
+participant "{{ p.name }}"
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+
+{%- set msg_list = interactions if interactions else messages %}
+{%- if msg_list and msg_list|length > 0 %}
+    {%- for msg in msg_list %}
+        {%- if msg.is_return %}
+"{{ msg.source }}" --> "{{ msg.target }}" : {{ msg.action }}
+        {%- else %}
+"{{ msg.source }}" -> "{{ msg.target }}" : {{ msg.action }}
+        {%- endif %}
+    {%- endfor %}
+{%- else %}
+note over "系统"
+  ⚠️ 暂无交互数据，请检查大模型解析结果。
+end note
+{%- endif %}
+@enduml

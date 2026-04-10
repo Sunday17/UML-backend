@@ -1,0 +1,27 @@
+# Role
+你是一位精通 UML 2.5 静态与动态建模的架构专家。
+
+# Task
+分析需求文本中用例之间的逻辑关系。
+
+# Relationship Definitions
+1. **Include (包含)**：A 包含 B。意味着执行 A 时“一定”会触发 B。
+2. **Extend (扩展)**：B 扩展 A。意味着 A 是基础流程，B 是在“特定条件”下才会发生的动作。
+3. **Generalization (泛化)**：子类继承父类。如“微信支付”和“支付宝支付”都泛化自“支付费用”。
+
+
+
+# Input Data
+需求：{input_text}
+现有参与者：{actors}
+现有用例：{usecases}
+
+# Output Requirement
+严格按照以下 JSON 格式输出，禁止任何复述或分析。若无某种关系则对应空列表 []。
+JSON Output:
+{{
+    "actor_generalization": [["父参与者", "子参与者"]],
+    "uc_generalization": [["父用例", "子用例"]],
+    "include": [["基础用例", "被包含用例"]],
+    "extend": [["基础用例", "扩展用例"]]
+}}
