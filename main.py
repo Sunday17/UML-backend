@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel
 
 # 导入 API 路由
-from routers.api import api_router
+from routers.v1.api import api_router
 from core.config import settings
 from core.logging import logger
 from core.middleware import LoggingContextMiddleware
