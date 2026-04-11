@@ -24,6 +24,7 @@ from schemas.uml import (
     UMLFinalResponse,
     SyncRequest,
     SyncResponse,
+    SequenceDiagramItem,
 )
 
 
@@ -61,28 +62,57 @@ async def extract_uml(
     2. ainvoke 执行，在 interrupt_before 设定的节点处自动挂起
     3. 返回提取结果，前端可编辑确认
     4. 结果存入数据库（is_confirmed=False）
+
+    注意：需求文本从数据库 project.requirement_text 自动读取，无需前端传入。
     """
     model_type = _validate_type(model_type)
 
-    # 校验项目存在
+    # 校验项目存在，同时取出需求文本
     project = await database_service.get_project_by_id(db, req.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # 时序图前置依赖检查：必须已有已确认的 usecase 和 class
+    if model_type == "sequence":
+        missing = await uml_service.get_missing_dependencies(db, req.project_id)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"生成时序图前需先完成以下图表：{', '.join(missing)}，请先前往生成。",
+            )
+
+    # 需求文本从数据库直接读取，不再依赖前端传入
+    requirement_text = project.requirement_text
+
     # 启动 LangGraph 提取（自动根据 model_type 路由到对应流水线）
+    # 时序图会从数据库读取 usecase/class 数据填充状态
     extracted_data = await uml_service.run_extract(
         model_type=model_type,
-        requirement_text=req.requirement_text,
+        requirement_text=requirement_text,
         thread_id=project.thread_id,
+        project_id=project.id,
+        db=db,
     )
 
     # 持久化中间态 JSON
-    await database_service.save_initial_uml_model(
-        db,
-        project_id=project.id,
-        model_type=model_type,
-        data_json=extracted_data,
-    )
+    # 时序图：每个用例存一条记录
+    if model_type == "sequence":
+        seq_data = extracted_data.get("sequence_data", {})
+        saved_usecases = []
+        for uc_name in seq_data.keys():
+            uc_data = {"sequence_data": {uc_name: seq_data[uc_name]}}
+            await database_service.save_initial_uml_model(
+                db, project_id=project.id, model_type=model_type, data_json=uc_data, usecase_name=uc_name
+            )
+            saved_usecases.append(uc_name)
+        print(f"[extract] sequence: saved {len(saved_usecases)} usecase diagrams")
+    else:
+        await database_service.save_initial_uml_model(
+            db,
+            project_id=project.id,
+            model_type=model_type,
+            data_json=extracted_data,
+        )
 
     return TableDataResponse(
         project_id=project.id,
@@ -108,6 +138,8 @@ async def generate_uml(
     2. 传入 None 恢复执行，从断点继续直到图结束
     3. 渲染 PlantUML 代码
     4. 持久化最终产物（is_confirmed=True）
+
+    时序图特殊规则：必须先完成用例图和类图，若未完成则返回 400 并列出缺少的图。
     """
     model_type = _validate_type(model_type)
 
@@ -115,26 +147,65 @@ async def generate_uml(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 恢复 LangGraph 执行，生成 PUML
+    # 时序图前置依赖检查：必须已有已确认的 usecase 和 class
+    if model_type == "sequence":
+        missing = await uml_service.get_missing_dependencies(db, req.project_id)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"生成时序图前需先完成以下图表：{', '.join(missing)}，请先前往生成。",
+            )
+
+    # 恢复 LangGraph 执行，生成 PUML（db/project_id 传入以便时序图回填）
     result = await uml_service.resume_and_generate(
         model_type=model_type,
         thread_id=project.thread_id,
         confirmed_data=req.confirmed_data,
+        project_id=project.id,
+        db=db,
     )
 
     # 持久化最终产物
+    # 时序图：每个用例单独存一条记录
+    if model_type == "sequence" and "diagrams" in result:
+        saved_diagrams = []
+        for diag in result["diagrams"]:
+            uc_name = diag["usecase_name"]
+            uc_data = {"sequence_data": {uc_name: diag.get("sequence_data", {})}}
+            model = await database_service.save_sequence_diagram(
+                db,
+                project_id=project.id,
+                usecase_name=uc_name,
+                data_json=uc_data,
+                puml_code=diag["puml_code"],
+                image_url=diag["image_url"],
+            )
+            saved_diagrams.append(model)
+        print(f"[generate] sequence: saved {len(saved_diagrams)} diagrams")
+
+        return UMLFinalResponse(
+            diagrams=[
+                SequenceDiagramItem(
+                    usecase_name=d["usecase_name"],
+                    puml_code=d["puml_code"],
+                    image_url=d["image_url"],
+                )
+                for d in result["diagrams"]
+            ]
+        )
+
     await database_service.update_model_with_puml(
         db,
         project_id=project.id,
         model_type=model_type,
         confirmed_data=req.confirmed_data,
         puml_code=result["puml_code"],
-        image_base64=result["image_base64"],
+        image_url=result["image_url"],
     )
 
     return UMLFinalResponse(
         puml_code=result["puml_code"],
-        image_base64=result["image_base64"],
+        image_url=result["image_url"],
     )
 
 
@@ -169,19 +240,43 @@ async def sync_puml_code(
         model_type=req.model_type,
         puml_code=req.puml_code,
         current_state=current_state,
+        usecase_name=req.usecase_name,
     )
 
     # 3. 更新数据库
+    # 时序图：每个用例单独存一条记录
+    if req.model_type == "sequence" and "diagrams" in sync_result:
+        for diag in sync_result["diagrams"]:
+            uc_name = diag["usecase_name"]
+            uc_data = {"sequence_data": {uc_name: sync_result.get("new_json_data", {}).get(uc_name, {})}}
+            await database_service.save_sequence_diagram(
+                db,
+                project_id=project.id,
+                usecase_name=uc_name,
+                data_json=uc_data,
+                puml_code=diag["puml_code"],
+                image_url=diag["image_url"],
+            )
+        return SyncResponse(
+            diagrams=[
+                SequenceDiagramItem(
+                    usecase_name=d["usecase_name"],
+                    puml_code=d["puml_code"],
+                    image_url=d["image_url"],
+                )
+                for d in sync_result["diagrams"]
+            ]
+        )
+
     await database_service.update_model_with_puml(
         db,
         project_id=project.id,
         model_type=req.model_type,
         confirmed_data=sync_result["new_json_data"],
         puml_code=req.puml_code,
-        image_base64=sync_result["image_base64"],
+        image_url=sync_result["image_url"],
     )
 
     return SyncResponse(
-        image_base64=sync_result["image_base64"],
-        synced_model=sync_result["new_json_data"],
+        image_url=sync_result["image_url"],
     )

@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from routers.v1.projects import router as projects_router
 from routers.v1.uml import router as uml_router
 
-api_router = APIRouter(prefix="/api/v1")
+api_router = APIRouter()
 
 # 项目管理路由（/projects）
 api_router.include_router(projects_router, prefix="/projects", tags=["Projects"])

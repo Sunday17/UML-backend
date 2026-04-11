@@ -9,26 +9,27 @@ skinparam sequence {
     ActorBorderColor #336699
     LifeLineBorderColor #336699
     LifeLineBackgroundColor #E2E8F0
-    
+
     ParticipantBorderColor #336699
     ParticipantBackgroundColor #EBF4FA
     ParticipantFontColor #333333
     ParticipantFontSize 14
-    
+
     DatabaseBorderColor #336699
     DatabaseBackgroundColor #EBF4FA
     DatabaseFontColor #333333
-    
+
     BoundaryBorderColor #336699
     BoundaryBackgroundColor #EBF4FA
-    
+
     ControlBorderColor #336699
     ControlBackgroundColor #EBF4FA
 }
 
-{%- for p in participants %}
+{%- set participants_list = participants if participants else [] %}
+{%- set msg_list = interactions if interactions else messages %}
+{%- for p in participants_list %}
     {%- if loop.first %}
-        ' 第一个参与者使用特殊标记
         {%- if p.type|lower == 'actor' %}
 actor "{{ p.name }}" << (A,#FFAAAA) >> order 0
         {%- elif p.type|lower == 'boundary' %}
@@ -59,7 +60,6 @@ participant "{{ p.name }}"
     {%- endif %}
 {%- endfor %}
 
-{%- set msg_list = interactions if interactions else messages %}
 {%- if msg_list and msg_list|length > 0 %}
     {%- for msg in msg_list %}
         {%- if msg.is_return %}
@@ -70,7 +70,7 @@ participant "{{ p.name }}"
     {%- endfor %}
 {%- else %}
 note over "系统"
-  ⚠️ 暂无交互数据，请检查大模型解析结果。
+  暂无交互数据，请检查大模型解析结果。
 end note
 {%- endif %}
 @enduml

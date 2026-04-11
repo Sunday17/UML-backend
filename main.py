@@ -17,7 +17,8 @@ from core.middleware import LoggingContextMiddleware
 
 # UML 模型，用于 SQLAlchemy 自动建表
 from models.uml import Project, UMLModel
-from models.database import engine 
+from models.database import engine
+from services.database import ensure_uml_models_schema
 
 # Load environment variables
 load_dotenv()
@@ -35,8 +36,8 @@ async def lifespan(app: FastAPI):
     # 【重点新增】：项目启动时，自动在 MySQL 中建表
     try:
         async with engine.begin() as conn:
-            # 运行同步的建表语句
             await conn.run_sync(SQLModel.metadata.create_all)
+            await ensure_uml_models_schema(conn)
         logger.info("Database tables verified/created successfully.")
     except Exception as e:
         logger.error(f"Failed to create database tables: {e}")

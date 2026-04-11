@@ -16,7 +16,7 @@ def sync_puml_to_state(
     diagram_type: str, puml_code: str, current_state: Dict[str, Any]
 ) -> Dict[str, Any]:
     """读取修改后的 PUML 代码，调用大模型将其变更同步回 State JSON。"""
-    print(f"🔄 正在分析 {diagram_type} PUML 的人工修改内容并同步至数据流...")
+    print(f"[SYNC] analyzing {diagram_type} PUML changes and syncing to state...")
 
     prompt_tpl = get_template("puml_sync_prompt", "将PUML解析为JSON")
 
@@ -33,8 +33,10 @@ def sync_puml_to_state(
             "class_details": current_state.get("class_details"),
             "class_relationships": current_state.get("class_relationships"),
         }
-    else:
-        return current_state
+    elif diagram_type == "sequence":
+        original_data = {
+            "sequence_data": current_state.get("sequence_data", {}),
+        }
 
     prompt = prompt_tpl.format(
         diagram_type=diagram_type,
@@ -49,8 +51,8 @@ def sync_puml_to_state(
 
     try:
         updated_data = json.loads(res)
-        print("✅ PUML 修改已成功解析并合并至全局 State！")
+        print("[OK] PUML changes parsed and merged to state")
         return updated_data
     except Exception as e:
-        print(f"⚠️ PUML 逆向解析失败: {e}，返回空字典。")
+        print(f"[WARN] PUML reverse-parse failed: {e}, returning empty dict")
         return {}

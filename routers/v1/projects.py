@@ -15,7 +15,9 @@ router = APIRouter()
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(db: AsyncSession = Depends(get_session)):
     """获取所有项目列表（按创建时间倒序）。"""
-    return await database_service.list_projects(db)
+    # TODO: 权限校验恢复后取消注释
+    # return await database_service.list_projects(db)
+    return []
 
 
 @router.post("", response_model=ProjectOut)

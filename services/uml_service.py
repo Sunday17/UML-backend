@@ -4,9 +4,10 @@
 1. run_extract()       启动 LangGraph，在断点处自动暂停，返回中间态 JSON
 2. resume_and_generate() 合并用户确认数据，续跑图，渲染 PUML，返回代码和图片
 3. sync_from_puml()    接收 PUML 代码，逆向解析为 JSON，重新渲染
+4. get_missing_dependencies() 序列图专用：检查 usecase/class 是否已生成
 """
 
-from typing import Any
+from typing import Any, Optional
 import os
 
 from jinja2 import Environment, FileSystemLoader
@@ -14,6 +15,7 @@ from jinja2 import Environment, FileSystemLoader
 from core.langgraph.workflow import build_graph
 from utils.puml_renderer import render_puml_to_base64
 from core.langgraph.tools.puml_parser import sync_puml_to_state
+from services.database import database_service
 
 # Jinja2 模板目录（core/templates/puml/）
 _TEMPLATE_DIR = os.path.join(
@@ -23,6 +25,12 @@ _puml_env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR)) if os.path.isdir
 
 
 def _render_puml_from_state(model_type: str, state: dict) -> str:
+    """根据 model_type 和当前 State 数据，使用 Jinja2 模板渲染 PUML 代码。
+
+    注意：时序图不走此函数，由 _render_single_sequence_diagram 按每个用例单独渲染。
+    """
+    if model_type == "sequence":
+        return ""  # sequence 由 generate_multi_sequence 单独处理
     """根据 model_type 和当前 State 数据，使用 Jinja2 模板渲染 PUML 代码。"""
     if _puml_env is None:
         return _render_fallback_puml(model_type, state)
@@ -40,7 +48,7 @@ def _render_puml_from_state(model_type: str, state: dict) -> str:
         tmpl = _puml_env.get_template(tmpl_name)
         return tmpl.render(**_build_context(model_type, state))
     except Exception as e:
-        print(f"⚠️ PUML 模板渲染失败 [{model_type}]: {e}")
+        print(f"[WARN] PUML template render failed [{model_type}]: {e}")
         return _render_fallback_puml(model_type, state)
 
 
@@ -123,6 +131,40 @@ def _render_fallback_puml(model_type: str, state: dict) -> str:
     return "@startuml\n@enduml"
 
 
+def _render_single_sequence_diagram(usecase_name: str, seq_data: dict) -> str:
+    """渲染单个用例的时序图 PUML 代码。"""
+    if _puml_env is None:
+        return _render_seq_fallback(usecase_name, seq_data)
+
+    try:
+        tmpl = _puml_env.get_template("sequence.puml.j2")
+        return tmpl.render(
+            usecase_name=usecase_name,
+            participants=seq_data.get("participants", []),
+            interactions=seq_data.get("interactions", []),
+            messages=seq_data.get("messages", []),
+        )
+    except Exception as e:
+        print(f"[WARN] sequence template render failed for [{usecase_name}]: {e}")
+        return _render_seq_fallback(usecase_name, seq_data)
+
+
+def _render_seq_fallback(usecase_name: str, seq_data: dict) -> str:
+    """sequence 模板不存在时的兜底渲染。"""
+    lines = ["@startuml", f"title 时序图：{usecase_name}"]
+    participants = seq_data.get("participants", [])
+    all_parts = []
+    for p in participants:
+        if isinstance(p, dict):
+            all_parts.append(p.get("name", str(p)))
+        else:
+            all_parts.append(str(p))
+    for p in all_parts:
+        lines.append(f"participant {p}")
+    lines.append("@enduml")
+    return "\n".join(lines)
+
+
 def _extract_return_data(model_type: str, state: dict) -> dict:
     """从 LangGraph 运行结果中提取返回给前端的数据。"""
     if model_type == "usecase":
@@ -160,14 +202,18 @@ class UMLService:
         return self._graph
 
     async def run_extract(
-        self, model_type: str, requirement_text: str, thread_id: str
+        self, model_type: str, requirement_text: str, thread_id: str, project_id: int = None, db=None
     ) -> dict:
         """启动 LangGraph，运行到断点暂停，返回中间态 JSON。
+
+        时序图特殊处理：从数据库读取已确认的 usecase/class 数据填充状态。
 
         Args:
             model_type: usecase / class / sequence
             requirement_text: 用户原始需求文本
             thread_id: LangGraph 会话 ID（项目创建时生成）
+            project_id: 项目 ID（时序图回填时需要）
+            db: 数据库会话（时序图回填时需要传入）
 
         Returns:
             提取出的结构化 JSON 数据（供前端表格展示）
@@ -187,6 +233,15 @@ class UMLService:
             "sequence_data": {},
         }
 
+        # 时序图：从数据库读取 usecase/class 完整数据填充状态
+        if model_type == "sequence" and db and project_id:
+            db_filled = await self._fill_state_from_db(db, project_id)
+            if db_filled:
+                print(f"[Sequence Extract] 从数据库回填状态: {list(db_filled.keys())}")
+                initial_state = {**initial_state, **db_filled}
+            else:
+                print("[Sequence Extract] 警告：数据库中未找到 usecase/class 数据")
+
         # ainvoke 执行图，在 interrupt_before 设定的节点处自动挂起：
         #   usecase  -> 断点在 relationship_agent
         #   class    -> 断点在 class_attr_method_agent
@@ -194,62 +249,163 @@ class UMLService:
         result = await self.app_graph.ainvoke(initial_state, config)
         return _extract_return_data(model_type, result)
 
+    async def get_missing_dependencies(
+        self, db, project_id: int
+    ) -> list[str]:
+        """时序图专用：检查 usecase / class 是否都已生成并确认，返回缺失的类型列表。"""
+        missing = []
+        for dep in ("usecase", "class"):
+            model = await database_service.get_latest_confirmed_model(db, project_id, dep)
+            if not model:
+                missing.append(dep)
+        return missing
+
+    async def _fill_state_from_db(self, db, project_id: int) -> dict:
+        """时序图专用：从数据库读取已确认的 usecase/class JSON，填充到状态中。
+
+        读取完整的 usecase 和 class 数据（actors, usecases, entities, relationships, classes,
+        class_details, class_relationships），写入 checkpoint 状态供时序图生成使用。
+        """
+        filled = {}
+
+        # 读取 usecase 数据
+        usecase_model = await database_service.get_latest_confirmed_model(db, project_id, "usecase")
+        if usecase_model and usecase_model.data_json:
+            filled["actors"] = usecase_model.data_json.get("actors", [])
+            filled["usecases"] = usecase_model.data_json.get("usecases", [])
+            filled["entities"] = usecase_model.data_json.get("entities", {})
+            filled["relationships"] = usecase_model.data_json.get("relationships", {})
+
+        # 读取 class 数据
+        class_model = await database_service.get_latest_confirmed_model(db, project_id, "class")
+        if class_model and class_model.data_json:
+            filled["classes"] = class_model.data_json.get("classes", [])
+            filled["class_details"] = class_model.data_json.get("class_details", {})
+            filled["class_relationships"] = class_model.data_json.get("class_relationships", {})
+
+        return filled
+
     async def resume_and_generate(
-        self, model_type: str, thread_id: str, confirmed_data: dict
+        self, model_type: str, thread_id: str, confirmed_data: dict, project_id: int = None, db=None
     ) -> dict:
         """接收用户确认的数据，合并到 checkpoint 状态，续跑图，生成 PUML。
+
+        时序图特殊处理：必须从数据库读取已确认的 usecase/class JSON 数据填充状态，
+        再续跑（即使 checkpoint 中有数据也会覆盖，确保数据一致性）。
 
         Args:
             model_type: usecase / class / sequence
             thread_id: LangGraph 会话 ID
             confirmed_data: 用户在表格中修改/确认的数据
+            project_id: 项目 ID（时序图回填时需要）
+            db: 数据库会话（时序图回填时需要传入）
 
         Returns:
-            {"puml_code": "...", "image_base64": "data:image/png;base64,..."}
+            {"puml_code": "...", "image_url": "data:image/png;base64,..."}
         """
         config = {"configurable": {"thread_id": thread_id}}
 
-        # 1. 获取 checkpoint 中已有的状态（保留 run_extract 的提取结果）
+        # 1. 获取 checkpoint 中已有的状态
         current_state = self.app_graph.get_state(config).values
 
-        # 2. 合并：原有状态 + 用户确认的数据（后者优先级更高）
+        # 2. 时序图：强制从数据库回填 usecase/class 完整数据
+        if model_type == "sequence" and db and project_id:
+            db_filled = await self._fill_state_from_db(db, project_id)
+            if db_filled:
+                print(f"[Sequence] 从数据库回填状态: {list(db_filled.keys())}")
+                current_state = {**current_state, **db_filled}
+            else:
+                print("[Sequence] 警告：数据库中未找到 usecase/class 数据")
+
+        # 3. 合并：原有状态 + 用户确认的数据（后者优先级更高）
         merged_state = {**current_state, **confirmed_data}
 
-        # 3. 将合并后的状态写入 checkpoint（避免覆盖已提取的字段）
+        # 4. 将合并后的状态写入 checkpoint（避免覆盖已提取的字段）
         self.app_graph.update_state(config, merged_state)
 
-        # 4. 传入 None 恢复执行，从断点继续直到图结束
+        # 5. 传入 None 恢复执行，从断点继续直到图结束
         result = await self.app_graph.ainvoke(None, config)
 
-        # 5. 用 Jinja2 模板渲染 PUML 代码
+        # 6. 时序图：按每个用例单独渲染 PUML 和图片
+        if model_type == "sequence":
+            return await self.generate_multi_sequence(result)
+
+        # 7. 用 Jinja2 模板渲染 PUML 代码
         puml_code = _render_puml_from_state(model_type, result)
 
-        # 6. 调用远程 PlantUML 服务渲染图片
-        image_base64 = await render_puml_to_base64(puml_code)
+        # 8. 调用远程 PlantUML 服务渲染图片
+        image_url = await render_puml_to_base64(puml_code)
 
         return {
             "puml_code": puml_code,
-            "image_base64": image_base64,
+            "image_url": image_url,
         }
 
+    async def generate_multi_sequence(self, result_state: dict) -> dict:
+        """时序图专用：为每个用例单独生成一张 PUML 图和图片。
+
+        Args:
+            result_state: LangGraph 运行结束后的完整状态（含 sequence_data）
+
+        Returns:
+            {
+                "diagrams": [
+                    {"usecase_name": "用例A", "puml_code": "...", "image_url": "..."},
+                    {"usecase_name": "用例B", "puml_code": "...", "image_url": "..."},
+                ]
+            }
+        """
+        sequence_data = result_state.get("sequence_data", {})
+        diagrams = []
+
+        for usecase_name, seq_data in sequence_data.items():
+            puml_code = _render_single_sequence_diagram(usecase_name, seq_data)
+            image_url = await render_puml_to_base64(puml_code)
+            diagrams.append({
+                "usecase_name": usecase_name,
+                "puml_code": puml_code,
+                "image_url": image_url,
+            })
+            print(f"[Sequence] 渲染完成: {usecase_name} ({len(puml_code)} chars)")
+
+        print(f"[Sequence] 共生成 {len(diagrams)} 张时序图")
+        return {"diagrams": diagrams}
+
     async def sync_from_puml(
-        self, model_type: str, puml_code: str, current_state: dict
+        self, model_type: str, puml_code: str, current_state: dict, usecase_name: str = None
     ) -> dict:
-        """接收 PUML 代码，逆向解析为 JSON 并重新渲染图片。
+        """接收 PUML 代码，逆向解析为 JSON，重新渲染图片，并更新数据库。
+
+        时序图支持：传入 usecase_name 则只同步该用例的图。
 
         Args:
             model_type: usecase / class / sequence
             puml_code: 用户修改后的 PUML 代码
             current_state: 当前图的内存状态（参考上下文）
+            usecase_name: 时序图专用，指定要同步的用例名称
 
         Returns:
-            {"new_json_data": {...}, "image_base64": "..."}
+            {"image_url": "..."} 或 {"diagrams": [...]}（时序图）
         """
-        new_data = sync_puml_to_state(model_type, puml_code, current_state)
-        image_base64 = await render_puml_to_base64(puml_code)
+        if model_type == "sequence":
+            new_json_data = sync_puml_to_state(model_type, puml_code, current_state)
+            if usecase_name:
+                seq_data = new_json_data.get(usecase_name, {})
+                puml = _render_single_sequence_diagram(usecase_name, seq_data)
+                image_url = await render_puml_to_base64(puml)
+                return {"usecase_name": usecase_name, "new_json_data": new_json_data, "image_url": image_url, "puml_code": puml}
+            diagrams = []
+            for uc_name, seq_data in new_json_data.items():
+                puml = _render_single_sequence_diagram(uc_name, seq_data)
+                image_url = await render_puml_to_base64(puml)
+                diagrams.append({"usecase_name": uc_name, "puml_code": puml, "image_url": image_url})
+            return {"diagrams": diagrams, "new_json_data": new_json_data}
+
+        new_json_data = sync_puml_to_state(model_type, puml_code, current_state)
+        image_url = await render_puml_to_base64(puml_code)
         return {
-            "new_json_data": new_data,
-            "image_base64": image_base64,
+            "new_json_data": new_json_data,
+            "image_url": image_url,
         }
 
 

@@ -1,5 +1,3 @@
-import json
-import re
 import time
 from openai import OpenAI
 from core.config import settings
@@ -22,11 +20,11 @@ def openai_chat_completion(system_prompt: str, history: list, temperature=0, max
             response_format={"type": "json_object"},
         )
         usage = response.usage
-        print(f"[{settings.OPENAI_MODEL}] 消耗: Prompt {usage.prompt_tokens}, Completion {usage.completion_tokens}")
+        print(f"[{settings.OPENAI_MODEL}] usage: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}")
         return response.choices[0].message.content
     except Exception as e:
-        print(f"❌ LLM 调用异常: {e}")
-        return "{}"
+        print(f"[ERROR] LLM call failed: {e}")
+        raise
 
 
 def openai_reasoning_completion(prompt: str, max_tokens=10000) -> str:
@@ -34,9 +32,7 @@ def openai_reasoning_completion(prompt: str, max_tokens=10000) -> str:
     start_time = time.time()
     client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.BASE_URL)
 
-    messages = [
-        {"role": "user", "content": prompt}
-    ]
+    messages = [{"role": "user", "content": prompt}]
 
     try:
         response = client.chat.completions.create(
@@ -46,8 +42,8 @@ def openai_reasoning_completion(prompt: str, max_tokens=10000) -> str:
         )
         usage = response.usage
         cost_time = time.time() - start_time
-        print(f"[{settings.REASONING_MODEL}] 消耗: Prompt {usage.prompt_tokens}, Completion {usage.completion_tokens}, time: {cost_time:.2f}s")
+        print(f"[{settings.REASONING_MODEL}] usage: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, time={cost_time:.2f}s")
         return response.choices[0].message.content
     except Exception as e:
-        print(f"❌ 推理 LLM 调用异常: {e}")
-        return ""
+        print(f"[ERROR] reasoning LLM call failed: {e}")
+        raise

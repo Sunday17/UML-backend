@@ -1,6 +1,6 @@
 """UML-related Pydantic schemas."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Any, List, Optional
 
 
@@ -18,9 +18,18 @@ class ProjectOut(BaseModel):
     name: str
     requirement_text: str
     thread_id: str
+    user_id: int = 0
     created_at: Any
 
     model_config = {"from_attributes": True}
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def user_id_none_as_zero(cls, v: object) -> int:
+        """库中 user_id 可为 NULL，与 int 字段冲突时统一为 0。"""
+        if v is None:
+            return 0
+        return int(v)  # type: ignore[arg-type]
 
 
 # ================================================================
@@ -29,11 +38,7 @@ class ProjectOut(BaseModel):
 
 class ExtractRequest(BaseModel):
     project_id: int
-    requirement_text: str = Field(
-        ...,
-        example="用户登录系统后，可以查询图书并下单",
-        description="支持在提取时动态更新需求文本",
-    )
+    usecase_name: Optional[str] = Field(default=None, description="时序图专用：指定提取哪个用例的图，为空则提取全部")
 
 
 # ================================================================
@@ -52,6 +57,7 @@ class TableDataResponse(BaseModel):
             "sequence:{sequence_data:{}}"
         ),
     )
+    usecase_name: Optional[str] = Field(default=None, description="时序图专用：关联的用例名称")
 
 
 # ================================================================
@@ -70,11 +76,19 @@ class GenerateRequest(BaseModel):
 # 5. 最终产物响应
 # ================================================================
 
+class SequenceDiagramItem(BaseModel):
+    """时序图单个用例的完整数据。"""
+    usecase_name: str
+    puml_code: str = Field(..., description="该用例的 PlantUML 源码")
+    image_url: str = Field(..., description="该用例的预览图")
+
+
 class UMLFinalResponse(BaseModel):
-    puml_code: str = Field(..., description="生成的 PlantUML 源码")
-    image_base64: str = Field(
-        ...,
-        description="渲染后的图片，格式: data:image/png;base64,...",
+    puml_code: Optional[str] = Field(default=None, description="PlantUML 源码（usecase/class 用）")
+    image_url: Optional[str] = Field(default=None, description="预览图（usecase/class 用）")
+    diagrams: Optional[List[SequenceDiagramItem]] = Field(
+        default=None,
+        description="时序图专用：按用例拆分的多张图列表",
     )
 
 
@@ -86,8 +100,12 @@ class SyncRequest(BaseModel):
     project_id: int
     model_type: str = Field(..., example="usecase")
     puml_code: str = Field(..., example="@startuml\n:Actor: -> (UseCase)\n@enduml")
+    usecase_name: Optional[str] = Field(default=None, description="时序图专用：指定同步哪个用例")
 
 
 class SyncResponse(BaseModel):
-    image_base64: str = Field(..., description="重新渲染后的图片 Base64")
-    synced_model: Dict[str, Any] = Field(..., description="从 PUML 逆向解析出的 JSON 数据")
+    image_url: Optional[str] = Field(default=None, description="重新渲染后的预览（usecase/class 用）")
+    diagrams: Optional[List[SequenceDiagramItem]] = Field(
+        default=None,
+        description="时序图专用：按用例拆分的多张图列表",
+    )
