@@ -27,6 +27,7 @@ from schemas.uml import (
     SequenceDiagramItem,
     SequenceExtractResponse,
     SequenceOptionsResponse,
+    UMLDeleteRequest,
 )
 
 
@@ -322,3 +323,34 @@ async def sync_puml_code(
     return SyncResponse(
         image_url=sync_result["image_url"],
     )
+
+
+# ================================================================
+# 4. UML 图表删除
+# ================================================================
+
+@router.delete("/record", status_code=204)
+async def delete_uml_record(
+    req: UMLDeleteRequest,
+    db: AsyncSession = Depends(get_session),
+):
+    """根据 project_id、model_type 和（可选的）usecase_name 删除特定 UML 记录。
+
+    - usecase / class：删除该类型全部记录。
+    - sequence + usecase_name：仅删除该用例的记录。
+    - sequence 无 usecase_name：删除该类型全部记录。
+    """
+    project = await database_service.get_project_by_id(db, req.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    success = await database_service.delete_uml_model(
+        db,
+        project_id=req.project_id,
+        model_type=req.model_type,
+        usecase_name=req.usecase_name,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="UML Record not found")
+
+    return None

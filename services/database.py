@@ -323,6 +323,36 @@ class DatabaseService:
         result = await db.exec(statement)
         return result.first()
 
+    async def delete_uml_model(
+        self,
+        db: AsyncSession,
+        project_id: int,
+        model_type: str,
+        usecase_name: Optional[str] = None,
+    ) -> bool:
+        """删除 UML 模型记录。
+
+        - model_type 为 sequence 且传入 usecase_name：仅删除该特定用例的消息记录。
+        - 否则：删除该 project_id + model_type 下的全部记录。
+        返回 True 表示有记录被删除，False 表示无匹配记录。
+        """
+        statement = select(UMLModel).where(
+            UMLModel.project_id == project_id,
+            UMLModel.model_type == model_type,
+        )
+        if model_type == "sequence" and usecase_name:
+            statement = statement.where(UMLModel.usecase_name == usecase_name)
+
+        result = await db.exec(statement)
+        records = list(result.all())
+        if not records:
+            return False
+
+        for record in records:
+            await db.delete(record)
+        await db.commit()
+        return True
+
     async def list_models_by_project(
         self, db: AsyncSession, project_id: int
     ) -> List[UMLModel]:

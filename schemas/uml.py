@@ -107,6 +107,19 @@ class UMLFinalResponse(BaseModel):
 
 
 # ================================================================
+# 7. UML 图表删除
+# ================================================================
+
+class UMLDeleteRequest(BaseModel):
+    project_id: int
+    model_type: str = Field(..., description="图类型：usecase / class / sequence")
+    usecase_name: Optional[str] = Field(
+        default=None,
+        description="时序图专用：指定删除特定用例的记录，不传则删除该类型全部记录",
+    )
+
+
+# ================================================================
 # 6. PUML 逆向同步
 # ================================================================
 
