@@ -25,6 +25,8 @@ from schemas.uml import (
     SyncRequest,
     SyncResponse,
     SequenceDiagramItem,
+    SequenceExtractResponse,
+    SequenceOptionsResponse,
 )
 
 
@@ -45,10 +47,45 @@ def _validate_type(model_type: str) -> str:
 
 
 # ================================================================
+# 0. 时序图选项（用例列表）
+# ================================================================
+
+@router.get("/sequence/options/{project_id}", response_model=SequenceOptionsResponse)
+async def get_sequence_options(
+    project_id: int,
+    db: AsyncSession = Depends(get_session),
+):
+    """
+    返回当前项目可用的时序图选项（已确认用例图的用例名称列表）。
+    前端先调用此接口获取可选用例，再传入 selected_usecases 调用 extract。
+    """
+    project = await database_service.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    usecase_model = await database_service.get_latest_model(db, project_id, "usecase")
+    if not usecase_model:
+        raise HTTPException(
+            status_code=400,
+            detail="项目下暂无用例图数据，请先前往提取并生成用例图。",
+        )
+    if not usecase_model.is_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="用例图尚未确认，请先在用例图页面确认后，再生成时序图。",
+        )
+    if not usecase_model.data_json:
+        return SequenceOptionsResponse(project_id=project_id, options=[])
+
+    options = usecase_model.data_json.get("usecases", [])
+    return SequenceOptionsResponse(project_id=project_id, options=options)
+
+
+# ================================================================
 # 1. 启动 LLM 提取（断点暂停，返回中间态 JSON）
 # ================================================================
 
-@router.post("/{model_type}/extract", response_model=TableDataResponse)
+@router.post("/{model_type}/extract")
 async def extract_uml(
     model_type: str,
     req: ExtractRequest,
@@ -80,6 +117,12 @@ async def extract_uml(
                 status_code=400,
                 detail=f"生成时序图前需先完成以下图表：{', '.join(missing)}，请先前往生成。",
             )
+        # 时序图必须选择至少一个用例
+        if not req.selected_usecases:
+            raise HTTPException(
+                status_code=400,
+                detail="时序图生成必须传入 selected_usecases 参数，请先调用 /uml/sequence/options/{project_id} 获取可选用例。",
+            )
 
     # 需求文本从数据库直接读取，不再依赖前端传入
     requirement_text = project.requirement_text
@@ -92,20 +135,37 @@ async def extract_uml(
         thread_id=project.thread_id,
         project_id=project.id,
         db=db,
+        selected_usecases=req.selected_usecases,
     )
 
     # 持久化中间态 JSON
-    # 时序图：每个用例存一条记录
+    # 时序图：仅保存被选中的用例，同时渲染 PUML + 图片
     if model_type == "sequence":
         seq_data = extracted_data.get("sequence_data", {})
         saved_usecases = []
-        for uc_name in seq_data.keys():
-            uc_data = {"sequence_data": {uc_name: seq_data[uc_name]}}
+        for uc_name in req.selected_usecases:
+            uc_entry = seq_data.get(uc_name, {})
+            uc_data = {"sequence_data": {uc_name: uc_entry}}
             await database_service.save_initial_uml_model(
                 db, project_id=project.id, model_type=model_type, data_json=uc_data, usecase_name=uc_name
             )
             saved_usecases.append(uc_name)
         print(f"[extract] sequence: saved {len(saved_usecases)} usecase diagrams")
+
+        # 渲染 PUML + 图片并返回
+        diagrams = await uml_service._render_sequence_diagrams(seq_data)
+        return SequenceExtractResponse(
+            project_id=project.id,
+            thread_id=project.thread_id,
+            diagrams=[
+                SequenceDiagramItem(
+                    usecase_name=d["usecase_name"],
+                    puml_code=d["puml_code"],
+                    image_url=d["image_url"],
+                )
+                for d in diagrams
+            ],
+        )
     else:
         await database_service.save_initial_uml_model(
             db,

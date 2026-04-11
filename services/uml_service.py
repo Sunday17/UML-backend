@@ -202,7 +202,7 @@ class UMLService:
         return self._graph
 
     async def run_extract(
-        self, model_type: str, requirement_text: str, thread_id: str, project_id: int = None, db=None
+        self, model_type: str, requirement_text: str, thread_id: str, project_id: int = None, db=None, selected_usecases: list = None
     ) -> dict:
         """启动 LangGraph，运行到断点暂停，返回中间态 JSON。
 
@@ -214,6 +214,7 @@ class UMLService:
             thread_id: LangGraph 会话 ID（项目创建时生成）
             project_id: 项目 ID（时序图回填时需要）
             db: 数据库会话（时序图回填时需要传入）
+            selected_usecases: 时序图专用，前端选择的用例列表
 
         Returns:
             提取出的结构化 JSON 数据（供前端表格展示）
@@ -230,6 +231,7 @@ class UMLService:
             "classes": [],
             "class_details": {},
             "class_relationships": {},
+            "selected_usecases": selected_usecases or [],
             "sequence_data": {},
         }
 
@@ -268,7 +270,7 @@ class UMLService:
         """
         filled = {}
 
-        # 读取 usecase 数据
+        # 读取 usecase 数据（要求已确认；路由层已有前置依赖检查确保此处有值）
         usecase_model = await database_service.get_latest_confirmed_model(db, project_id, "usecase")
         if usecase_model and usecase_model.data_json:
             filled["actors"] = usecase_model.data_json.get("actors", [])
@@ -276,7 +278,7 @@ class UMLService:
             filled["entities"] = usecase_model.data_json.get("entities", {})
             filled["relationships"] = usecase_model.data_json.get("relationships", {})
 
-        # 读取 class 数据
+        # 读取 class 数据（要求已确认；路由层已有前置依赖检查确保此处有值）
         class_model = await database_service.get_latest_confirmed_model(db, project_id, "class")
         if class_model and class_model.data_json:
             filled["classes"] = class_model.data_json.get("classes", [])
@@ -356,8 +358,13 @@ class UMLService:
             }
         """
         sequence_data = result_state.get("sequence_data", {})
-        diagrams = []
+        diagrams = await self._render_sequence_diagrams(sequence_data)
+        print(f"[Sequence] 共生成 {len(diagrams)} 张时序图")
+        return {"diagrams": diagrams}
 
+    async def _render_sequence_diagrams(self, sequence_data: dict) -> list:
+        """渲染每个用例的时序图，返回 PUML + 图片列表。"""
+        diagrams = []
         for usecase_name, seq_data in sequence_data.items():
             puml_code = _render_single_sequence_diagram(usecase_name, seq_data)
             image_url = await render_puml_to_base64(puml_code)
@@ -367,9 +374,7 @@ class UMLService:
                 "image_url": image_url,
             })
             print(f"[Sequence] 渲染完成: {usecase_name} ({len(puml_code)} chars)")
-
-        print(f"[Sequence] 共生成 {len(diagrams)} 张时序图")
-        return {"diagrams": diagrams}
+        return diagrams
 
     async def sync_from_puml(
         self, model_type: str, puml_code: str, current_state: dict, usecase_name: str = None

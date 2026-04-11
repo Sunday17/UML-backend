@@ -6,17 +6,21 @@ from core.langgraph.tools.extract_json_from_response import parse_json_from_resp
 
 
 def extract_seq_participants_node(state: UMLState) -> dict:
-    """Agent 6: 为每个用例提取参与者"""
+    """Agent 6: 为选中的用例提取参与者"""
     print("======== [Seq-Agent-1] extracting participants ========")
     input_text = state.get("input_text", "")
-    usecases = state.get("usecases", [])
     actors = state.get("actors", [])
     classes = state.get("classes", [])
-
     sequence_data = state.get("sequence_data", {})
     prompt_tpl = get_template("sd_participant_prompt", "")
 
-    for uc in usecases:
+    # 仅处理被选中的用例
+    target_usecases = state.get("selected_usecases", [])
+    if not target_usecases:
+        print("[WARN] no selected_usecases, skip participant extraction")
+        return {"sequence_data": sequence_data}
+
+    for uc in target_usecases:
         print(f"  -> analyzing participants for: [{uc}]")
         prompt = prompt_tpl.format(
             input_text=input_text,
@@ -47,15 +51,22 @@ def extract_seq_participants_node(state: UMLState) -> dict:
 
 
 def extract_seq_messages_node(state: UMLState) -> dict:
-    """Agent 7: 为每个用例编排消息序列"""
+    """Agent 7: 为选中的用例编排消息序列"""
     print("======== [Seq-Agent-2] arranging interaction messages ========")
     input_text = state.get("input_text", "")
     sequence_data = state.get("sequence_data", {})
     prompt_tpl = get_template("sd_message_prompt", "")
 
-    for uc, data in sequence_data.items():
+    # 仅处理被选中的用例
+    target_usecases = state.get("selected_usecases", [])
+    if not target_usecases:
+        print("[WARN] no selected_usecases, skip message extraction")
+        return {"sequence_data": sequence_data}
+
+    for uc in target_usecases:
         print(f"  -> arranging messages for: [{uc}]")
-        participants = data.get("participants", [])
+        uc_data = sequence_data.get(uc, {})
+        participants = uc_data.get("participants", [])
         if not participants:
             continue
 

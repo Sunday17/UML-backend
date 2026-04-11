@@ -38,12 +38,19 @@ class ProjectOut(BaseModel):
 
 class ExtractRequest(BaseModel):
     project_id: int
-    usecase_name: Optional[str] = Field(default=None, description="时序图专用：指定提取哪个用例的图，为空则提取全部")
+    selected_usecases: Optional[List[str]] = Field(
+        default=None,
+        description="时序图专用：前端选择的用例列表，不传则提取全部",
+    )
 
 
 # ================================================================
-# 3. 提取结果响应 (表格数据)
+# 3. 时序图选项（用例列表）
 # ================================================================
+
+class SequenceOptionsResponse(BaseModel):
+    project_id: int
+    options: List[str] = Field(description="已确认的用例名称列表，供前端选择")
 
 class TableDataResponse(BaseModel):
     project_id: int
@@ -81,6 +88,13 @@ class SequenceDiagramItem(BaseModel):
     usecase_name: str
     puml_code: str = Field(..., description="该用例的 PlantUML 源码")
     image_url: str = Field(..., description="该用例的预览图")
+
+
+class SequenceExtractResponse(BaseModel):
+    """时序图 extract 阶段响应：每个用例返回 PUML 源码 + 预览图。"""
+    project_id: int
+    thread_id: str
+    diagrams: List[SequenceDiagramItem]
 
 
 class UMLFinalResponse(BaseModel):
