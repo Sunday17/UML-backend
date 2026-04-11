@@ -13,7 +13,7 @@ import os
 from jinja2 import Environment, FileSystemLoader
 
 from core.langgraph.workflow import build_graph
-from utils.puml_renderer import render_puml_to_base64
+from utils.puml_renderer import render_puml_to_url
 from core.langgraph.tools.puml_parser import sync_puml_to_state
 from services.database import database_service
 
@@ -303,7 +303,7 @@ class UMLService:
             db: 数据库会话（时序图回填时需要传入）
 
         Returns:
-            {"puml_code": "...", "image_url": "data:image/png;base64,..."}
+            {"puml_code": "...", "image_url": "http://www.plantuml.com/plantuml/png/..."}
         """
         config = {"configurable": {"thread_id": thread_id}}
 
@@ -336,7 +336,7 @@ class UMLService:
         puml_code = _render_puml_from_state(model_type, result)
 
         # 8. 调用远程 PlantUML 服务渲染图片
-        image_url = await render_puml_to_base64(puml_code)
+        image_url = await render_puml_to_url(puml_code)
 
         return {
             "puml_code": puml_code,
@@ -367,7 +367,7 @@ class UMLService:
         diagrams = []
         for usecase_name, seq_data in sequence_data.items():
             puml_code = _render_single_sequence_diagram(usecase_name, seq_data)
-            image_url = await render_puml_to_base64(puml_code)
+            image_url = await render_puml_to_url(puml_code)
             diagrams.append({
                 "usecase_name": usecase_name,
                 "puml_code": puml_code,
@@ -397,17 +397,17 @@ class UMLService:
             if usecase_name:
                 seq_data = new_json_data.get(usecase_name, {})
                 puml = _render_single_sequence_diagram(usecase_name, seq_data)
-                image_url = await render_puml_to_base64(puml)
+                image_url = await render_puml_to_url(puml)
                 return {"usecase_name": usecase_name, "new_json_data": new_json_data, "image_url": image_url, "puml_code": puml}
             diagrams = []
             for uc_name, seq_data in new_json_data.items():
                 puml = _render_single_sequence_diagram(uc_name, seq_data)
-                image_url = await render_puml_to_base64(puml)
+                image_url = await render_puml_to_url(puml)
                 diagrams.append({"usecase_name": uc_name, "puml_code": puml, "image_url": image_url})
             return {"diagrams": diagrams, "new_json_data": new_json_data}
 
         new_json_data = sync_puml_to_state(model_type, puml_code, current_state)
-        image_url = await render_puml_to_base64(puml_code)
+        image_url = await render_puml_to_url(puml_code)
         return {
             "new_json_data": new_json_data,
             "image_url": image_url,

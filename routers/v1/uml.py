@@ -32,7 +32,6 @@ from schemas.uml import (
 
 router = APIRouter()
 
-# 支持的图类型
 _VALID_TYPES = {"usecase", "class", "sequence"}
 
 
@@ -104,12 +103,10 @@ async def extract_uml(
     """
     model_type = _validate_type(model_type)
 
-    # 校验项目存在，同时取出需求文本
     project = await database_service.get_project_by_id(db, req.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 时序图前置依赖检查：必须已有已确认的 usecase 和 class
     if model_type == "sequence":
         missing = await uml_service.get_missing_dependencies(db, req.project_id)
         if missing:
@@ -117,18 +114,14 @@ async def extract_uml(
                 status_code=400,
                 detail=f"生成时序图前需先完成以下图表：{', '.join(missing)}，请先前往生成。",
             )
-        # 时序图必须选择至少一个用例
         if not req.selected_usecases:
             raise HTTPException(
                 status_code=400,
                 detail="时序图生成必须传入 selected_usecases 参数，请先调用 /uml/sequence/options/{project_id} 获取可选用例。",
             )
 
-    # 需求文本从数据库直接读取，不再依赖前端传入
     requirement_text = project.requirement_text
 
-    # 启动 LangGraph 提取（自动根据 model_type 路由到对应流水线）
-    # 时序图会从数据库读取 usecase/class 数据填充状态
     extracted_data = await uml_service.run_extract(
         model_type=model_type,
         requirement_text=requirement_text,
@@ -138,22 +131,23 @@ async def extract_uml(
         selected_usecases=req.selected_usecases,
     )
 
-    # 持久化中间态 JSON
-    # 时序图：仅保存被选中的用例，同时渲染 PUML + 图片
+    # 时序图：渲染 PUML + 图片，再持久化（puml_code / image_url / data_json 三字段全量保存）
     if model_type == "sequence":
         seq_data = extracted_data.get("sequence_data", {})
-        saved_usecases = []
-        for uc_name in req.selected_usecases:
-            uc_entry = seq_data.get(uc_name, {})
-            uc_data = {"sequence_data": {uc_name: uc_entry}}
-            await database_service.save_initial_uml_model(
-                db, project_id=project.id, model_type=model_type, data_json=uc_data, usecase_name=uc_name
-            )
-            saved_usecases.append(uc_name)
-        print(f"[extract] sequence: saved {len(saved_usecases)} usecase diagrams")
-
-        # 渲染 PUML + 图片并返回
         diagrams = await uml_service._render_sequence_diagrams(seq_data)
+        for d in diagrams:
+            uc_name = d["usecase_name"]
+            uc_data = {"sequence_data": {uc_name: seq_data.get(uc_name, {})}}
+            await database_service.save_sequence_diagram(
+                db,
+                project_id=project.id,
+                usecase_name=uc_name,
+                data_json=uc_data,
+                puml_code=d["puml_code"],
+                image_url=d["image_url"],
+            )
+        print(f"[extract] sequence: saved {len(diagrams)} diagrams")
+
         return SequenceExtractResponse(
             project_id=project.id,
             thread_id=project.thread_id,
@@ -166,13 +160,13 @@ async def extract_uml(
                 for d in diagrams
             ],
         )
-    else:
-        await database_service.save_initial_uml_model(
-            db,
-            project_id=project.id,
-            model_type=model_type,
-            data_json=extracted_data,
-        )
+
+    await database_service.save_initial_uml_model(
+        db,
+        project_id=project.id,
+        model_type=model_type,
+        data_json=extracted_data,
+    )
 
     return TableDataResponse(
         project_id=project.id,
@@ -198,8 +192,6 @@ async def generate_uml(
     2. 传入 None 恢复执行，从断点继续直到图结束
     3. 渲染 PlantUML 代码
     4. 持久化最终产物（is_confirmed=True）
-
-    时序图特殊规则：必须先完成用例图和类图，若未完成则返回 400 并列出缺少的图。
     """
     model_type = _validate_type(model_type)
 
@@ -207,7 +199,6 @@ async def generate_uml(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 时序图前置依赖检查：必须已有已确认的 usecase 和 class
     if model_type == "sequence":
         missing = await uml_service.get_missing_dependencies(db, req.project_id)
         if missing:
@@ -216,7 +207,6 @@ async def generate_uml(
                 detail=f"生成时序图前需先完成以下图表：{', '.join(missing)}，请先前往生成。",
             )
 
-    # 恢复 LangGraph 执行，生成 PUML（db/project_id 传入以便时序图回填）
     result = await uml_service.resume_and_generate(
         model_type=model_type,
         thread_id=project.thread_id,
@@ -225,13 +215,12 @@ async def generate_uml(
         db=db,
     )
 
-    # 持久化最终产物
     # 时序图：每个用例单独存一条记录
     if model_type == "sequence" and "diagrams" in result:
         saved_diagrams = []
         for diag in result["diagrams"]:
             uc_name = diag["usecase_name"]
-            uc_data = {"sequence_data": {uc_name: diag.get("sequence_data", {})}}
+            uc_data = {"sequence_data": {uc_name: {}}}
             model = await database_service.save_sequence_diagram(
                 db,
                 project_id=project.id,
@@ -280,10 +269,6 @@ async def sync_puml_code(
 ):
     """
     用户手动修改 PUML 代码 -> 逆向解析为 JSON -> 重新渲染图片 -> 更新数据库。
-
-    适用于：
-    - 用户在编辑器中直接修改 PUML 源码
-    - 需要从源码反向更新模型数据
     """
     req.model_type = _validate_type(req.model_type)
 
@@ -291,11 +276,9 @@ async def sync_puml_code(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 1. 获取当前模型状态（用于 PUML 解析时的上下文参考）
     current_model = await database_service.get_latest_model(db, req.project_id, req.model_type)
     current_state = current_model.data_json if current_model else {}
 
-    # 2. 逆向解析 PUML → JSON
     sync_result = await uml_service.sync_from_puml(
         model_type=req.model_type,
         puml_code=req.puml_code,
@@ -303,7 +286,6 @@ async def sync_puml_code(
         usecase_name=req.usecase_name,
     )
 
-    # 3. 更新数据库
     # 时序图：每个用例单独存一条记录
     if req.model_type == "sequence" and "diagrams" in sync_result:
         for diag in sync_result["diagrams"]:
